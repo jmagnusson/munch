@@ -163,3 +163,40 @@ def test_toYAML():
     assert b.toYAML(default_flow_style=True) == '{foo: [bar, {lol: true}], hello: 42}\n'
     assert yaml.dump(b, default_flow_style=True) == '!munch.Munch {foo: [bar, !munch.Munch {lol: true}], hello: 42}\n'
     assert b.toYAML(Dumper=yaml.Dumper, default_flow_style=True) == '!munch.Munch {foo: [bar, !munch.Munch {lol: true}], hello: 42}\n'
+
+
+@pytest.mark.parametrize("attrname", dir(Munch))
+def test_reserved_attributes(attrname):
+    # Make sure that the default attributes on the Munch instance are
+    # accessible.
+
+    taken_munch = Munch(**{attrname: 'abc123'})
+
+    # Make sure that the attribute is determined as in the filled collection...
+    assert attrname in taken_munch
+
+    # ...and that it is available using key access...
+    assert taken_munch[attrname] == 'abc123'
+
+    # ...but that it is not available using attribute access.
+    attr = getattr(taken_munch, attrname)
+    assert attr != 'abc123'
+
+    empty_munch = Munch()
+
+    # Make sure that the attribute is not seen contained in the empty
+    # collection...
+    assert attrname not in empty_munch
+
+    # ...and that the attr is of the correct original type.
+    attr = getattr(empty_munch, attrname)
+    if attrname == '__doc__':
+        assert isinstance(attr, str)
+    elif attrname in ('__hash__', '__weakref__'):
+        assert attr is None
+    elif attrname == '__module__':
+        assert attr == 'munch'
+    elif attrname == '__dict__':
+        assert attr == {}
+    else:
+        assert callable(attr)
