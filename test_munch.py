@@ -1,6 +1,6 @@
 import json
 import pytest
-from munch import Munch, munchify, unmunchify
+from munch import Munch
 
 
 def test_base():
@@ -109,20 +109,20 @@ def test_fromDict():
 
 
 def test_munchify():
-    b = munchify({'urmom': {'sez': {'what': 'what'}}})
+    b = Munch.munchify({'urmom': {'sez': {'what': 'what'}}})
     assert b.urmom.sez.what == 'what'
 
-    b = munchify({'lol': ('cats', {'hah': 'i win again'}), 'hello': [{'french': 'salut', 'german': 'hallo'}]})
+    b = Munch.munchify({'lol': ('cats', {'hah': 'i win again'}), 'hello': [{'french': 'salut', 'german': 'hallo'}]})
     assert b.hello[0].french == 'salut'
     assert b.lol[1].hah == 'i win again'
 
 
 def test_unmunchify():
     b = Munch(foo=Munch(lol=True), hello=42, ponies='are pretty!')
-    assert sorted(unmunchify(b).items()) == [('foo', {'lol': True}), ('hello', 42), ('ponies', 'are pretty!')]
+    assert sorted(Munch.unmunchify(b).items()) == [('foo', {'lol': True}), ('hello', 42), ('ponies', 'are pretty!')]
 
     b = Munch(foo=['bar', Munch(lol=True)], hello=42, ponies=('are pretty!', Munch(lies='are trouble!')))
-    assert sorted(unmunchify(b).items()) == [('foo', ['bar', {'lol': True}]), ('hello', 42), ('ponies', ('are pretty!', {'lies': 'are trouble!'}))]
+    assert sorted(Munch.unmunchify(b).items()) == [('foo', ['bar', {'lol': True}]), ('hello', 42), ('ponies', ('are pretty!', {'lies': 'are trouble!'}))]
 
 
 def test_toJSON():

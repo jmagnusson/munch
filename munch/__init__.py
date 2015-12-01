@@ -24,50 +24,13 @@
 __version__ = '2.0.4'
 VERSION = tuple(map(int, __version__.split('.')))
 
-__all__ = ('Munch', 'munchify', 'unmunchify')
+__all__ = ('Munch', 'OrderedMunch', 'munchify', 'unmunchify')
 
-from .python3_compat import *  # noqa
+import json
+from ._compat import OrderedDict
 
 
-class Munch(dict):
-    """ A dictionary that provides attribute-style access.
-
-        >>> b = Munch()
-        >>> b.hello = 'world'
-        >>> b.hello
-        'world'
-        >>> b['hello'] += "!"
-        >>> b.hello
-        'world!'
-        >>> b.foo = Munch(lol=True)
-        >>> b.foo.lol
-        True
-        >>> b.foo is b['foo']
-        True
-
-        A Munch is a subclass of dict; it supports all the methods a dict does...
-
-        >>> sorted(b.keys())
-        ['foo', 'hello']
-
-        Including update()...
-
-        >>> b.update({ 'ponies': 'are pretty!' }, hello=42)
-        >>> print (repr(b))
-        Munch({'ponies': 'are pretty!', 'foo': Munch({'lol': True}), 'hello': 42})
-
-        As well as iteration...
-
-        >>> sorted([ (k,b[k]) for k in b ])
-        [('foo', Munch({'lol': True})), ('hello', 42), ('ponies', 'are pretty!')]
-
-        And "splats".
-
-        >>> "The {knights} who say {ni}!".format(**Munch(knights='lolcats', ni='can haz'))
-        'The lolcats who say can haz!'
-
-        See unmunchify/Munch.toDict, munchify/Munch.fromDict for notes about conversion.
-    """
+class _MunchBase(object):
 
     # only called if k not found in normal places
     def __getattr__(self, k):
@@ -161,7 +124,7 @@ class Munch(dict):
 
             See unmunchify for more info.
         """
-        return unmunchify(self)
+        return self.unmunchify(self)
 
     def __repr__(self):
         """ Invertible* string-form of a Munch.
@@ -183,12 +146,12 @@ class Munch(dict):
         return '%s(%s)' % (self.__class__.__name__, dict.__repr__(self))
 
     def __dir__(self):
-        return list(iterkeys(self))
+        return list(self.keys())
 
     __members__ = __dir__  # for python2.x compatibility
 
-    @staticmethod
-    def fromDict(d):
+    @classmethod
+    def fromDict(cls, d):
         """ Recursively transforms a dictionary into a Munch via copy.
 
             >>> b = Munch.fromDict({'urmom': {'sez': {'what': 'what'}}})
@@ -197,75 +160,65 @@ class Munch(dict):
 
             See munchify for more info.
         """
-        return munchify(d)
+        return cls.munchify(d)
 
+    # While we could convert abstract types like Mapping or Iterable, I think
+    # munchify is more likely to "do what you mean" if it is conservative about
+    # casting (ex: isinstance(str,Iterable) == True ).
+    #
+    # Should you disagree, it is not difficult to duplicate this function with
+    # more aggressive coercion to suit your own purposes.
+    @classmethod
+    def munchify(cls, x):
+        """ Recursively transforms a dictionary into a Munch via copy.
 
-# While we could convert abstract types like Mapping or Iterable, I think
-# munchify is more likely to "do what you mean" if it is conservative about
-# casting (ex: isinstance(str,Iterable) == True ).
-#
-# Should you disagree, it is not difficult to duplicate this function with
-# more aggressive coercion to suit your own purposes.
+            >>> b = munchify({'urmom': {'sez': {'what': 'what'}}})
+            >>> b.urmom.sez.what
+            'what'
 
-def munchify(x):
-    """ Recursively transforms a dictionary into a Munch via copy.
+            munchify can handle intermediary dicts, lists and tuples (as well as
+            their subclasses), but ymmv on custom datatypes.
 
-        >>> b = munchify({'urmom': {'sez': {'what': 'what'}}})
-        >>> b.urmom.sez.what
-        'what'
+            >>> b = munchify({ 'lol': ('cats', {'hah':'i win again'}),
+            ...         'hello': [{'french':'salut', 'german':'hallo'}] })
+            >>> b.hello[0].french
+            'salut'
+            >>> b.lol[1].hah
+            'i win again'
 
-        munchify can handle intermediary dicts, lists and tuples (as well as
-        their subclasses), but ymmv on custom datatypes.
+            nb. As dicts are not hashable, they cannot be nested in sets/frozensets.
+        """
+        if isinstance(x, dict):
+            return cls((k, cls.munchify(v)) for k, v in x.items())
+        elif isinstance(x, (list, tuple)):
+            return type(x)(cls.munchify(v) for v in x)
+        else:
+            return x
 
-        >>> b = munchify({ 'lol': ('cats', {'hah':'i win again'}),
-        ...         'hello': [{'french':'salut', 'german':'hallo'}] })
-        >>> b.hello[0].french
-        'salut'
-        >>> b.lol[1].hah
-        'i win again'
+    @classmethod
+    def unmunchify(cls, x):
+        """ Recursively converts a Munch into a dictionary.
 
-        nb. As dicts are not hashable, they cannot be nested in sets/frozensets.
-    """
-    if isinstance(x, dict):
-        return Munch((k, munchify(v)) for k, v in iteritems(x))
-    elif isinstance(x, (list, tuple)):
-        return type(x)(munchify(v) for v in x)
-    else:
-        return x
+            >>> b = Munch(foo=Munch(lol=True), hello=42, ponies='are pretty!')
+            >>> sorted(unmunchify(b).items())
+            [('foo', {'lol': True}), ('hello', 42), ('ponies', 'are pretty!')]
 
+            unmunchify will handle intermediary dicts, lists and tuples (as well as
+            their subclasses), but ymmv on custom datatypes.
 
-def unmunchify(x):
-    """ Recursively converts a Munch into a dictionary.
+            >>> b = Munch(foo=['bar', Munch(lol=True)], hello=42,
+            ...         ponies=('are pretty!', Munch(lies='are trouble!')))
+            >>> sorted(unmunchify(b).items()) #doctest: +NORMALIZE_WHITESPACE
+            [('foo', ['bar', {'lol': True}]), ('hello', 42), ('ponies', ('are pretty!', {'lies': 'are trouble!'}))]
 
-        >>> b = Munch(foo=Munch(lol=True), hello=42, ponies='are pretty!')
-        >>> sorted(unmunchify(b).items())
-        [('foo', {'lol': True}), ('hello', 42), ('ponies', 'are pretty!')]
-
-        unmunchify will handle intermediary dicts, lists and tuples (as well as
-        their subclasses), but ymmv on custom datatypes.
-
-        >>> b = Munch(foo=['bar', Munch(lol=True)], hello=42,
-        ...         ponies=('are pretty!', Munch(lies='are trouble!')))
-        >>> sorted(unmunchify(b).items()) #doctest: +NORMALIZE_WHITESPACE
-        [('foo', ['bar', {'lol': True}]), ('hello', 42), ('ponies', ('are pretty!', {'lies': 'are trouble!'}))]
-
-        nb. As dicts are not hashable, they cannot be nested in sets/frozensets.
-    """
-    if isinstance(x, dict):
-        return dict((k, unmunchify(v)) for k, v in iteritems(x))
-    elif isinstance(x, (list, tuple)):
-        return type(x)(unmunchify(v) for v in x)
-    else:
-        return x
-
-
-# Serialization
-
-try:
-    try:
-        import json
-    except ImportError:
-        import simplejson as json
+            nb. As dicts are not hashable, they cannot be nested in sets/frozensets.
+        """
+        if isinstance(x, dict):
+            return cls._base((k, cls.unmunchify(v)) for k, v in x.items())
+        elif isinstance(x, (list, tuple)):
+            return type(x)(cls.unmunchify(v) for v in x)
+        else:
+            return x
 
     def toJSON(self, **options):
         """ Serializes this Munch to JSON. Accepts the same keyword options as `json.dumps()`.
@@ -275,11 +228,6 @@ try:
             True
         """
         return json.dumps(self, **options)
-
-    Munch.toJSON = toJSON
-
-except ImportError:
-    pass
 
 
 try:
@@ -329,16 +277,16 @@ try:
             >>> yaml.dump(b, default_flow_style=True)
             '!munch.Munch {foo: [bar, !munch.Munch {lol: true}], hello: 42}\\n'
         """
-        return dumper.represent_mapping(u('!munch.Munch'), data)
+        return dumper.represent_mapping('!munch.Munch', data)
 
-    yaml.add_constructor(u('!munch'), from_yaml)
-    yaml.add_constructor(u('!munch.Munch'), from_yaml)
+    yaml.add_constructor('!munch', from_yaml)
+    yaml.add_constructor('!munch.Munch', from_yaml)
 
-    SafeRepresenter.add_representer(Munch, to_yaml_safe)
-    SafeRepresenter.add_multi_representer(Munch, to_yaml_safe)
+    SafeRepresenter.add_representer(_MunchBase, to_yaml_safe)
+    SafeRepresenter.add_multi_representer(_MunchBase, to_yaml_safe)
 
-    Representer.add_representer(Munch, to_yaml)
-    Representer.add_multi_representer(Munch, to_yaml)
+    Representer.add_representer(_MunchBase, to_yaml)
+    Representer.add_multi_representer(_MunchBase, to_yaml)
 
     # Instance methods for YAML conversion
     def toYAML(self, **options):
@@ -367,8 +315,65 @@ try:
     def fromYAML(*args, **kwargs):
         return munchify(yaml.load(*args, **kwargs))
 
-    Munch.toYAML = toYAML
-    Munch.fromYAML = staticmethod(fromYAML)
+    _MunchBase.toYAML = toYAML
+    _MunchBase.fromYAML = staticmethod(fromYAML)
 
 except ImportError:
     pass
+
+
+class Munch(_MunchBase, dict):
+    """ A dictionary that provides attribute-style access.
+
+        >>> b = Munch()
+        >>> b.hello = 'world'
+        >>> b.hello
+        'world'
+        >>> b['hello'] += "!"
+        >>> b.hello
+        'world!'
+        >>> b.foo = Munch(lol=True)
+        >>> b.foo.lol
+        True
+        >>> b.foo is b['foo']
+        True
+
+        A Munch is a subclass of dict; it supports all the methods a dict does...
+
+        >>> sorted(b.keys())
+        ['foo', 'hello']
+
+        Including update()...
+
+        >>> b.update({ 'ponies': 'are pretty!' }, hello=42)
+        >>> print (repr(b))
+        Munch({'ponies': 'are pretty!', 'foo': Munch({'lol': True}), 'hello': 42})
+
+        As well as iteration...
+
+        >>> sorted([ (k,b[k]) for k in b ])
+        [('foo', Munch({'lol': True})), ('hello', 42), ('ponies', 'are pretty!')]
+
+        And "splats".
+
+        >>> "The {knights} who say {ni}!".format(**Munch(knights='lolcats', ni='can haz'))
+        'The lolcats who say can haz!'
+
+        See unmunchify/Munch.toDict, munchify/Munch.fromDict for notes about conversion.
+    """
+    _base = dict
+
+
+class OrderedMunch(_MunchBase, OrderedDict):
+    """Order-preserving version of Munch
+    Uses :py:class:`collections.OrderedDict` internally.
+    """
+    _base = OrderedDict
+
+    def __repr__(self):
+        return '%s(%s)' % (self.__class__.__name__, OrderedDict.__repr__(self))
+
+
+# Backwards-compatibility
+munchify = Munch.munchify
+unmunchify = Munch.unmunchify
